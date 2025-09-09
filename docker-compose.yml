@@ -6,14 +6,14 @@ services:
     container_name: st900-gps-tracker
     restart: unless-stopped
     ports:
-      - "8090:8090"  # TCP port for GPS trackers
-      - "3000:3000"  # HTTP API port
+      - "8091:8091"  # TCP port for GPS trackers
+      - "3001:3001"  # HTTP API port
     environment:
       - NODE_ENV=production
       - TCP_HOST=0.0.0.0
-      - TCP_PORT=8090
+      - TCP_PORT=8091
       - HTTP_HOST=0.0.0.0
-      - HTTP_PORT=3000
+      - HTTP_PORT=3001
       - DATABASE_PATH=/app/data/gps_tracker.db
       - LOG_LEVEL=info
       - MAX_CONNECTIONS=100
