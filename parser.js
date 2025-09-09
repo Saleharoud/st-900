@@ -190,7 +190,10 @@ class ST900Parser {
         const minute = timeStr.substr(2, 2);
         const second = timeStr.substr(4, 2);
         
-        const timestamp = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`).toISOString();
+        // Create timestamp and convert to Syria timezone (UTC+3)
+         const utcDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+         const syriaDate = new Date(utcDate.getTime() + (3 * 60 * 60 * 1000)); // Add 3 hours for Syria timezone
+         const timestamp = syriaDate.toISOString();
         
         if (this.isValidCoordinate(lat, lon)) {
           return {

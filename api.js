@@ -279,6 +279,14 @@ class GPSTrackerAPI {
   }
 
   formatLocationData(location) {
+    // Convert timestamps to Syria timezone (UTC+3) for display
+    const formatSyriaTime = (utcTime) => {
+      if (!utcTime) return null;
+      const date = new Date(utcTime);
+      const syriaTime = new Date(date.getTime() + (3 * 60 * 60 * 1000));
+      return syriaTime.toISOString().replace('Z', '+03:00');
+    };
+
     return {
       id: location.id,
       device_id: location.device_id,
@@ -288,8 +296,9 @@ class GPSTrackerAPI {
       speed: location.speed,
       altitude: location.altitude,
       heading: location.heading,
-      timestamp: location.timestamp,
-      created_at: location.created_at,
+      timestamp: formatSyriaTime(location.timestamp),
+      timestamp_syria: formatSyriaTime(location.timestamp),
+      created_at: formatSyriaTime(location.created_at),
       // Add computed fields
       coordinates: [location.lon, location.lat], // GeoJSON format [lng, lat]
       location_age_minutes: Math.round((new Date() - new Date(location.timestamp)) / (1000 * 60))
