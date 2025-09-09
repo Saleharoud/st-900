@@ -27,10 +27,11 @@ class ST900Parser {
     console.log('Parsing raw data:', data);
 
     try {
-      // Try different parsing methods based on common ST-900 formats
+      // Try different parsing methods based on common GPS tracker formats
       let parsed = this.parseStandardFormat(data) ||
                    this.parseCommaDelimited(data) ||
-                   this.parseAlternativeFormat(data);
+                   this.parseAlternativeFormat(data) ||
+                   this.parseHQFormat(data);
 
       if (parsed) {
         parsed.raw_data = data;
@@ -127,6 +128,84 @@ class ST900Parser {
           altitude: parseFloat(pairs.alt || pairs.altitude) || 0,
           timestamp: this.parseTimestamp(pairs.time)
         };
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Parse HQ format GPS data
+   * Example: *HQ,3072866250,V1,211806,A,3635.1452,N,03702.2586,E,000.00,000,090925,7FFFFBFF,417,02,202,23002#
+   */
+  parseHQFormat(data) {
+    // Check if it's HQ format
+    if (!data.startsWith('*HQ,') || !data.endsWith('#')) {
+      return null;
+    }
+
+    // Remove *HQ, prefix and # suffix
+    const cleanData = data.slice(4, -1);
+    const parts = cleanData.split(',');
+
+    if (parts.length >= 12) {
+      try {
+        const deviceId = parts[0]; // IMEI
+        const status = parts[3]; // A = valid, V = invalid
+        
+        if (status !== 'A') {
+          // Invalid GPS fix
+          return null;
+        }
+
+        // Parse coordinates in DDMM.MMMM format
+        const latDegMin = parseFloat(parts[4]); // 3635.1452
+        const latDir = parts[5]; // N or S
+        const lonDegMin = parseFloat(parts[6]); // 03702.2586
+        const lonDir = parts[7]; // E or W
+        
+        // Convert DDMM.MMMM to decimal degrees
+        const latDeg = Math.floor(latDegMin / 100);
+        const latMin = latDegMin % 100;
+        let lat = latDeg + (latMin / 60);
+        if (latDir === 'S') lat = -lat;
+        
+        const lonDeg = Math.floor(lonDegMin / 100);
+        const lonMin = lonDegMin % 100;
+        let lon = lonDeg + (lonMin / 60);
+        if (lonDir === 'W') lon = -lon;
+        
+        const speed = parseFloat(parts[8]) || 0; // Speed in knots
+        const heading = parseFloat(parts[9]) || 0; // Course
+        const dateStr = parts[10]; // DDMMYY format
+        
+        // Parse date DDMMYY
+        const day = dateStr.substr(0, 2);
+        const month = dateStr.substr(2, 2);
+        const year = '20' + dateStr.substr(4, 2);
+        
+        // Parse time from parts[2] (HHMMSS format)
+        const timeStr = parts[2];
+        const hour = timeStr.substr(0, 2);
+        const minute = timeStr.substr(2, 2);
+        const second = timeStr.substr(4, 2);
+        
+        const timestamp = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`).toISOString();
+        
+        if (this.isValidCoordinate(lat, lon)) {
+          return {
+            type: this.packetTypes.LOCATION,
+            device_id: deviceId,
+            lat: lat,
+            lon: lon,
+            speed: speed * 1.852, // Convert knots to km/h
+            heading: heading,
+            timestamp: timestamp
+          };
+        }
+      } catch (error) {
+        console.warn('Error parsing HQ format:', error);
+        return null;
       }
     }
 
