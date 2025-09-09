@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const GPSDatabase = require('./database');
+const SMSService = require('./sms-service');
 require('dotenv').config();
 
 class GPSTrackerAPI {
@@ -9,6 +10,7 @@ class GPSTrackerAPI {
     this.port = process.env.HTTP_PORT || 3000;
     this.host = process.env.HTTP_HOST || '0.0.0.0';
     this.db = new GPSDatabase();
+    this.smsService = new SMSService();
     
     this.setupMiddleware();
     this.setupRoutes();
@@ -181,6 +183,161 @@ class GPSTrackerAPI {
       }
     });
 
+    // SMS Command Management Endpoints
+    
+    // Send SMS command to device
+    this.app.post('/devices/:deviceId/commands', async (req, res) => {
+      try {
+        const { deviceId } = req.params;
+        const { commandType, parameters = {} } = req.body;
+
+        if (!commandType) {
+          return res.status(400).json({
+            success: false,
+            error: 'Command type is required'
+          });
+        }
+
+        const result = await this.smsService.sendCommand(deviceId, commandType, parameters);
+        
+        res.json({
+          success: true,
+          message: 'Command sent successfully',
+          data: result
+        });
+      } catch (error) {
+        console.error('Error sending command:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to send command',
+          message: error.message
+        });
+      }
+    });
+
+    // Get available commands
+    this.app.get('/devices/commands/available', (req, res) => {
+      try {
+        const commands = this.smsService.getAvailableCommands();
+        res.json({
+          success: true,
+          data: commands
+        });
+      } catch (error) {
+        console.error('Error getting available commands:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get available commands',
+          message: error.message
+        });
+      }
+    });
+
+    // Get command history for device
+    this.app.get('/devices/:deviceId/commands', async (req, res) => {
+      try {
+        const { deviceId } = req.params;
+        const limit = parseInt(req.query.limit) || 50;
+        
+        const commands = await this.smsService.getCommandHistory(deviceId, limit);
+        
+        res.json({
+          success: true,
+          device_id: deviceId,
+          count: commands.length,
+          data: commands
+        });
+      } catch (error) {
+        console.error('Error getting command history:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get command history',
+          message: error.message
+        });
+      }
+    });
+
+    // Update device phone number
+    this.app.put('/devices/:deviceId/phone', async (req, res) => {
+      try {
+        const { deviceId } = req.params;
+        const { phoneNumber } = req.body;
+
+        if (!phoneNumber) {
+          return res.status(400).json({
+            success: false,
+            error: 'Phone number is required'
+          });
+        }
+
+        await this.smsService.updateDevicePhone(deviceId, phoneNumber);
+        
+        res.json({
+          success: true,
+          message: 'Device phone number updated successfully',
+          device_id: deviceId,
+          phone_number: phoneNumber
+        });
+      } catch (error) {
+        console.error('Error updating device phone:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to update device phone number',
+          message: error.message
+        });
+      }
+    });
+
+    // Get pending commands
+    this.app.get('/commands/pending', async (req, res) => {
+      try {
+        const deviceId = req.query.deviceId;
+        const commands = await this.smsService.getPendingCommands(deviceId);
+        
+        res.json({
+          success: true,
+          count: commands.length,
+          data: commands
+        });
+      } catch (error) {
+        console.error('Error getting pending commands:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to get pending commands',
+          message: error.message
+        });
+      }
+    });
+
+    // Webhook for incoming SMS responses
+    this.app.post('/webhook/sms', async (req, res) => {
+      try {
+        const { From, Body } = req.body;
+        
+        if (!From || !Body) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing SMS data'
+          });
+        }
+
+        const result = await this.smsService.processIncomingSMS(From, Body);
+        
+        res.json({
+          success: true,
+          message: 'SMS processed successfully',
+          data: result
+        });
+      } catch (error) {
+        console.error('Error processing SMS webhook:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to process SMS',
+          message: error.message
+        });
+      }
+    });
+
     // Simple web interface for viewing locations
     this.app.get('/', (req, res) => {
       res.send(`
@@ -242,13 +399,64 @@ class GPSTrackerAPI {
               <div class="description">Get locations within geographic bounds (?north=&south=&east=&west=)</div>
             </div>
             
+            <h2>📱 SMS Command Management</h2>
+            
+            <div class="endpoint">
+              <div><span class="method">POST</span> <span class="url">/devices/{deviceId}/commands</span></div>
+              <div class="description">Send SMS command to device (requires Twilio setup)</div>
+            </div>
+            
+            <div class="endpoint">
+              <div><span class="method">GET</span> <span class="url">/devices/commands/available</span></div>
+              <div class="description">Get list of available SMS commands</div>
+            </div>
+            
+            <div class="endpoint">
+              <div><span class="method">GET</span> <span class="url">/devices/{deviceId}/commands</span></div>
+              <div class="description">Get command history for device</div>
+            </div>
+            
+            <div class="endpoint">
+              <div><span class="method">PUT</span> <span class="url">/devices/{deviceId}/phone</span></div>
+              <div class="description">Update device phone number for SMS commands</div>
+            </div>
+            
+            <div class="endpoint">
+              <div><span class="method">GET</span> <span class="url">/commands/pending</span></div>
+              <div class="description">Get pending commands waiting for device response</div>
+            </div>
+            
+            <div class="endpoint">
+              <div><span class="method">POST</span> <span class="url">/webhook/sms</span></div>
+              <div class="description">Webhook for Twilio SMS responses</div>
+            </div>
+            
             <h2>🔧 Configuration</h2>
             <p><strong>TCP Server:</strong> Listening for GPS trackers on port ${process.env.TCP_PORT || 8090}</p>
             <p><strong>HTTP API:</strong> Running on port ${this.port}</p>
+            <p><strong>SMS Service:</strong> ${this.smsService.client ? '✅ Enabled (Twilio)' : '❌ Disabled (Configure Twilio)'}</p>
             
             <h2>📱 Device Setup</h2>
             <p>Configure your ST-900 device with SMS command:</p>
             <code style="background: #f8f9fa; padding: 10px; display: block; border-radius: 5px;">8040000 YOUR_SERVER_IP ${process.env.TCP_PORT || 8090}</code>
+            
+            <h2>📲 SMS Commands Setup</h2>
+            <p>To enable SMS commands, configure these environment variables:</p>
+            <code style="background: #f8f9fa; padding: 10px; display: block; border-radius: 5px; margin: 10px 0;">
+TWILIO_ACCOUNT_SID=your_account_sid<br>
+TWILIO_AUTH_TOKEN=your_auth_token<br>
+TWILIO_PHONE_NUMBER=+1234567890
+            </code>
+            
+            <h3>Available SMS Commands:</h3>
+            <ul style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+              <li><strong>Set Server:</strong> 8040000 IP PORT</li>
+              <li><strong>Set Interval:</strong> 8090000 SECONDS</li>
+              <li><strong>Get Status:</strong> 8030000</li>
+              <li><strong>Reset Device:</strong> 8050000</li>
+              <li><strong>Enable GPS:</strong> 8060000 1</li>
+              <li><strong>Disable GPS:</strong> 8060000 0</li>
+            </ul>
           </div>
         </body>
         </html>

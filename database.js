@@ -29,9 +29,26 @@ class GPSDatabase {
       CREATE TABLE IF NOT EXISTS devices (
         device_id TEXT PRIMARY KEY,
         name TEXT,
+        phone_number TEXT,
         last_seen DATETIME,
         is_active BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+
+    // Create device commands table
+    const createCommandsTable = `
+      CREATE TABLE IF NOT EXISTS device_commands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT NOT NULL,
+        command_type TEXT NOT NULL,
+        command_text TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        sent_at DATETIME,
+        response_received_at DATETIME,
+        response_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (device_id) REFERENCES devices(device_id)
       )
     `;
 
@@ -39,12 +56,16 @@ class GPSDatabase {
     const createIndexes = [
       'CREATE INDEX IF NOT EXISTS idx_gps_logs_device_id ON gps_logs(device_id)',
       'CREATE INDEX IF NOT EXISTS idx_gps_logs_timestamp ON gps_logs(timestamp)',
-      'CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen)'
+      'CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen)',
+      'CREATE INDEX IF NOT EXISTS idx_commands_device_id ON device_commands(device_id)',
+      'CREATE INDEX IF NOT EXISTS idx_commands_status ON device_commands(status)',
+      'CREATE INDEX IF NOT EXISTS idx_commands_created_at ON device_commands(created_at)'
     ];
 
     try {
       this.db.exec(createGpsLogsTable);
       this.db.exec(createDevicesTable);
+      this.db.exec(createCommandsTable);
       
       createIndexes.forEach(indexQuery => {
         this.db.exec(indexQuery);
@@ -160,6 +181,118 @@ class GPSDatabase {
       return stmt.all();
     } catch (error) {
       console.error('Error getting active devices:', error);
+      throw error;
+    }
+  }
+
+  // Insert device command
+  insertCommand(data) {
+    const stmt = this.db.prepare(`
+      INSERT INTO device_commands (device_id, command_type, command_text, status)
+      VALUES (?, ?, ?, ?)
+    `);
+
+    try {
+      const result = stmt.run(
+        data.device_id,
+        data.command_type,
+        data.command_text,
+        data.status || 'pending'
+      );
+      return result;
+    } catch (error) {
+      console.error('Error inserting command:', error);
+      throw error;
+    }
+  }
+
+  // Update command status
+  updateCommandStatus(commandId, status, responseData = null) {
+    const stmt = this.db.prepare(`
+      UPDATE device_commands 
+      SET status = ?, response_data = ?, 
+          sent_at = CASE WHEN status = 'sent' THEN ? ELSE sent_at END,
+          response_received_at = CASE WHEN status = 'completed' THEN ? ELSE response_received_at END
+      WHERE id = ?
+    `);
+
+    try {
+      const now = new Date().toISOString();
+      const result = stmt.run(status, responseData, now, now, commandId);
+      return result;
+    } catch (error) {
+      console.error('Error updating command status:', error);
+      throw error;
+    }
+  }
+
+  // Get pending commands
+  getPendingCommands(deviceId = null) {
+    let query = `
+      SELECT * FROM device_commands 
+      WHERE status = 'pending'
+    `;
+    let params = [];
+
+    if (deviceId) {
+      query += ' AND device_id = ?';
+      params.push(deviceId);
+    }
+
+    query += ' ORDER BY created_at ASC';
+
+    const stmt = this.db.prepare(query);
+    try {
+      return stmt.all(...params);
+    } catch (error) {
+      console.error('Error getting pending commands:', error);
+      throw error;
+    }
+  }
+
+  // Get command history for device
+  getCommandHistory(deviceId, limit = 50) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM device_commands
+      WHERE device_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+
+    try {
+      return stmt.all(deviceId, limit);
+    } catch (error) {
+      console.error('Error getting command history:', error);
+      throw error;
+    }
+  }
+
+  // Update device phone number
+  updateDevicePhone(deviceId, phoneNumber) {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO devices (device_id, phone_number, last_seen)
+      VALUES (?, ?, ?)
+    `);
+
+    try {
+      const result = stmt.run(deviceId, phoneNumber, new Date().toISOString());
+      return result;
+    } catch (error) {
+      console.error('Error updating device phone:', error);
+      throw error;
+    }
+  }
+
+  // Get device by phone number
+  getDeviceByPhone(phoneNumber) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM devices WHERE phone_number = ?
+    `);
+
+    try {
+      return stmt.get(phoneNumber);
+    } catch (error) {
+      console.error('Error getting device by phone:', error);
       throw error;
     }
   }
